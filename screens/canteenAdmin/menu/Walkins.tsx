@@ -147,7 +147,7 @@ const Walkins: React.FC = () => {
     const dateTime = now.toLocaleString("en-IN", {
       timeZone: "Asia/Kolkata",
       day: "numeric",
-      month: "long",
+      month: "short",
       year: "numeric",
       hour: "numeric",
       minute: "2-digit",
@@ -158,20 +158,19 @@ const Walkins: React.FC = () => {
 <html>
 <head>
   <style>
-    body { font-family: Arial; margin: 15px; font-size: 22px; }
-    .header { text-align: center; font-weight: bold; font-size: 32px; margin-bottom: 10px; }
-    .datetime { text-align: center; font-size: 20px; margin-bottom: 20px; }
-    .info { margin-bottom: 20px; font-size: 20px; }
-    .row { display: flex; justify-content: space-between; margin: 8px 0; }
-    .total { border-top: 2px dashed #000; padding-top: 15px; margin-top: 20px; font-weight: bold; font-size: 28px; }
-    .footer { text-align: center; margin-top: 30px; font-size: 20px; }
+    body { font-family: Arial; margin: 15px; font-size: 42px; }
+    .header { text-align: center; font-weight: bold; font-size: 46px; margin-bottom: 10px; }
+    .datetime { text-align: center; font-size: 42px; margin-bottom: 20px; border-bottom: 2px dashed #000; padding-top: 15px;}
+    .info { margin-bottom: 20px; font-size: 42px; }
+    .row { display: flex; justify-content: space-between; margin: 8px 0; font-size: 36px; }
+    .total { border-top: 2px dashed #000; padding-top: 15px; margin-top: 20px; font-weight: bold; font-size: 42px; }
+    .footer { text-align: center; margin-top: 30px; margin-bottom: 80px; font-size: 38px; border-bottom: 2px dashed #000; padding-top: 15px; }
   </style>
 </head>
 <body>
   <div class="header">Pranavi's Samskriti (bakery)</div>
-  <div class="datetime">${dateTime}</div>
-  <div class="info">
-    <p><strong>Order ID:</strong> WI${now.getTime().toString().slice(-6)}</p>
+  <div class="datetime">${dateTime}
+  
   </div>
   <div class="items">
     ${orderedItems
@@ -190,7 +189,11 @@ const Walkins: React.FC = () => {
       <span>₹${totalAmount.toFixed(2)}</span>
     </div>
   </div>
-  <div class="footer">Thank For Choosing WORLDTEK</div>
+  <div class="footer">
+  Thank For Choosing WORLDTEK
+  <span></span><span style="color: #FF6B35; font-weight: bold;"></span><br/>
+    <br/>
+  </div>
 </body>
 </html>`;
 
