@@ -11,6 +11,7 @@ import {
   SafeAreaView,
   TextInput,
   Dimensions,
+  Modal, // Added
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import RNPrint from "react-native-print";
@@ -27,15 +28,21 @@ interface MenuItem {
 }
 
 const { width } = Dimensions.get("window");
-const isTablet = width >= 768;
+const isTablet = width >= 763;
 const isLargeTablet = width >= 1024;
-const numColumns = isLargeTablet ? 3 : isTablet ? 3 : 3; // 3 on tablets, 2 on phones
+const numColumns = isLargeTablet ? 3 : isTablet ? 3 : 2;
+
+
+const screenWidth = Dimensions.get("window").width;
+
+console.log("Screen Width:", screenWidth);
 
 const Walkins: React.FC = () => {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isCartModalVisible, setIsCartModalVisible] = useState<boolean>(false); // New State
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -161,7 +168,7 @@ const Walkins: React.FC = () => {
   </style>
 </head>
 <body>
-  <div class="header">PRANAVI'S Canteen</div>
+  <div class="header">Pranavi's Samskriti (bakery)</div>
   <div class="datetime">${dateTime}</div>
   <div class="info">
     <p><strong>Order ID:</strong> WI${now.getTime().toString().slice(-6)}</p>
@@ -183,15 +190,14 @@ const Walkins: React.FC = () => {
       <span>₹${totalAmount.toFixed(2)}</span>
     </div>
   </div>
-  <div class="footer">Thank You! Visit Again!</div>
+  <div class="footer">Thank For Choosing WORLDTEK</div>
 </body>
 </html>`;
 
     try {
       await RNPrint.print({ html });
       Alert.alert("Success", "Bill printed successfully!");
-      //here make api call to save the order details in backend 
-      //http://72.60.102.11:3100/api/orders/create
+
       const body = {
         mobileNumber: "0000000000",
         canteenId: 4,
@@ -205,18 +211,15 @@ const Walkins: React.FC = () => {
           amount: totalAmount,
         }
       };
-      console.log("Order Body:", body);
-      const response = await fetch("http://72.60.102.11:3100/api/orders/create", {
+
+      await fetch("http://72.60.102.11:3100/api/orders/create", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      console.log("Order API Response Status:", response);
 
       setMenuItems((prev) => prev.map((item) => ({ ...item, quantity: 0 })));
-      
+      setIsCartModalVisible(false); // Close modal after print
     } catch (err) {
       Alert.alert("Print Failed", "Could not print the bill.");
     }
@@ -228,15 +231,20 @@ const Walkins: React.FC = () => {
   };
 
   const renderItemCard = ({ item }: { item: MenuItem }) => (
-    <View style={styles.itemCard}>
+    <TouchableOpacity
+      style={styles.itemCard}
+      activeOpacity={0.9}
+      onPress={() => increaseQuantity(item.id)}
+    >
       <View style={styles.imageContainer}>
         {item.image ? (
           <Image source={{ uri: item.image }} style={styles.itemImage} />
         ) : (
           <View style={[styles.itemImage, styles.placeholder]}>
-            <Text style={styles.placeholderText}>🍽️</Text>
+            <Text style={styles.placeholderText}>Plate</Text>
           </View>
         )}
+
         <View style={[styles.foodTypeBadge, item.foodType === "veg" ? styles.vegBadge : styles.nonVegBadge]}>
           <View style={[styles.foodTypeIndicator, item.foodType === "veg" ? styles.vegIndicator : styles.nonVegIndicator]} />
         </View>
@@ -250,12 +258,14 @@ const Walkins: React.FC = () => {
         <Text style={styles.price}>₹{parseFloat(item.price).toFixed(2)}</Text>
       </View>
 
-      <View style={styles.quantityContainer}>
+      <View style={styles.quantityContainer} pointerEvents="box-none">
         {item.quantity === 0 ? (
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() => increaseQuantity(item.id)}
-            activeOpacity={0.8}
+            onPress={(e) => {
+              e.stopPropagation();
+              increaseQuantity(item.id);
+            }}
           >
             <Text style={styles.addText}>ADD +</Text>
           </TouchableOpacity>
@@ -263,44 +273,38 @@ const Walkins: React.FC = () => {
           <View style={styles.counter}>
             <TouchableOpacity
               style={styles.counterBtn}
-              onPress={() => decreaseQuantity(item.id)}
-              activeOpacity={0.7}
+              onPress={(e) => {
+                e.stopPropagation();
+                decreaseQuantity(item.id);
+              }}
             >
               <Text style={styles.counterText}>−</Text>
             </TouchableOpacity>
+
             <Text style={styles.counterValue}>{item.quantity}</Text>
+
             <TouchableOpacity
               style={styles.counterBtn}
-              onPress={() => increaseQuantity(item.id)}
-              activeOpacity={0.7}
+              onPress={(e) => {
+                e.stopPropagation();
+                increaseQuantity(item.id);
+              }}
             >
               <Text style={styles.counterText}>+</Text>
             </TouchableOpacity>
           </View>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderSection = ({ item }: { item: { title: string; data: MenuItem[] } }) => {
-    // Ensure items are divisible by numColumns for proper layout
     const itemsToRender = [...item.data];
     const remainder = itemsToRender.length % numColumns;
-    
     if (remainder !== 0) {
-      // Add placeholders to fill the last row
       const placeholdersNeeded = numColumns - remainder;
       for (let i = 0; i < placeholdersNeeded; i++) {
-        itemsToRender.push({
-          id: -(i + 1),
-          name: "",
-          description: "",
-          price: "0",
-          foodType: "veg",
-          image: "",
-          categoryName: "",
-          quantity: 0,
-        } as MenuItem);
+        itemsToRender.push({ id: -(i + 1), name: "", description: "", price: "0", foodType: "veg", image: "", categoryName: "", quantity: 0 } as MenuItem);
       }
     }
 
@@ -315,14 +319,12 @@ const Walkins: React.FC = () => {
         <FlatList
           data={itemsToRender}
           renderItem={({ item }) => {
-            if (item.id < 0) {
-              return <View style={[styles.itemCard, styles.placeholderCard]} />;
-            }
+            if (item.id < 0) return <View style={[styles.itemCard, styles.placeholderCard]} />;
             return renderItemCard({ item });
           }}
-          keyExtractor={(i, index) => i.id > 0 ? i.id.toString() : `placeholder-${index}`}
+          keyExtractor={(i) => i.id > 0 ? i.id.toString() : `placeholder-${i.id}`}
           numColumns={numColumns}
-          key={numColumns} // Important: forces re-render when columns change
+          key={numColumns}
           columnWrapperStyle={styles.columnWrapper}
           scrollEnabled={false}
         />
@@ -342,7 +344,7 @@ const Walkins: React.FC = () => {
   if (!isConnected) {
     return (
       <View style={styles.center}>
-        <Text style={styles.offlineIcon}>📡</Text>
+        <Text style={styles.offlineIcon}>No Connection</Text>
         <Text style={styles.offlineText}>No Internet Connection</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={fetchMenuItems}>
           <Text style={styles.retryText}>Retry</Text>
@@ -353,20 +355,20 @@ const Walkins: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header with Gradient Effect */}
+      {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>PRANAVI’S SAMSKRITI CANTEEN</Text>
+          <Text style={styles.title}>Pranavi's samskriti (bakery)</Text>
           <Text style={styles.subtitle}>Select your favorites</Text>
         </View>
         <TouchableOpacity style={styles.syncButton} onPress={fetchMenuItems}>
-          <Text style={styles.syncText}>🔄 Sync</Text>
+          <Text style={styles.syncText}>🔄</Text>
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Text style={styles.searchIcon}>Search</Text>
         <TextInput
           style={styles.searchInput}
           value={searchQuery}
@@ -376,7 +378,7 @@ const Walkins: React.FC = () => {
         />
         {searchQuery ? (
           <TouchableOpacity onPress={() => setSearchQuery("")} style={styles.clearButton}>
-            <Text style={styles.clearText}>✕</Text>
+            <Text style={styles.clearText}>Clear</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -390,7 +392,7 @@ const Walkins: React.FC = () => {
         contentContainerStyle={{ paddingBottom: totalItems > 0 ? 180 : 100 }}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>🍽️</Text>
+            <Text style={styles.emptyIcon}>Plate</Text>
             <Text style={styles.noResults}>
               {searchQuery ? "No items found" : "Menu is empty"}
             </Text>
@@ -398,34 +400,98 @@ const Walkins: React.FC = () => {
         }
       />
 
-      {/* Fixed Bottom Bar with Animation */}
+      {/* Cart Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={isCartModalVisible}
+        onRequestClose={() => setIsCartModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Your Cart ({totalItems} items)</Text>
+              <TouchableOpacity onPress={() => setIsCartModalVisible(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={menuItems.filter(item => item.quantity > 0)}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <View style={styles.cartItem}>
+                  <View style={styles.cartItemInfo}>
+                    <Text style={styles.cartItemName}>{item.name}</Text>
+                    <Text style={styles.cartItemPrice}>₹{parseFloat(item.price).toFixed(2)} each</Text>
+                  </View>
+                  <View style={styles.cartItemActions}>
+                    <TouchableOpacity style={styles.modalCounterBtn} onPress={() => decreaseQuantity(item.id)}>
+                      <Text style={styles.modalCounterText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.modalCounterValue}>{item.quantity}</Text>
+                    <TouchableOpacity style={styles.modalCounterBtn} onPress={() => increaseQuantity(item.id)}>
+                      <Text style={styles.modalCounterText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.cartItemTotal}>
+                    ₹{(parseFloat(item.price) * item.quantity).toFixed(2)}
+                  </Text>
+                </View>
+              )}
+              ListEmptyComponent={<Text style={styles.emptyCartText}>Your cart is empty</Text>}
+              style={{ maxHeight: Dimensions.get("window").height * 0.6 }}
+            />
+
+            <View style={styles.modalTotal}>
+              <Text style={styles.modalTotalLabel}>Total Amount</Text>
+              <Text style={styles.modalTotalAmount}>₹{totalAmount.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setIsCartModalVisible(false)}>
+                <Text style={styles.modalCloseBtnText}>Continue Ordering</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalPrintBtn} onPress={printReceipt}>
+                <Text style={styles.modalPrintBtnText}>Print Bill</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Fixed Bottom Bar */}
       {totalItems > 0 && (
         <View style={styles.footer}>
           <View style={styles.footerContent}>
-            <View style={styles.summary}>
+            {/* Clickable Total Items */}
+            <TouchableOpacity
+              style={styles.summary}
+              onPress={() => setIsCartModalVisible(true)}
+              activeOpacity={0.8}
+            >
               <Text style={styles.summaryLabel}>Total Items</Text>
               <Text style={styles.summaryText}>{totalItems} items</Text>
-            </View>
+            </TouchableOpacity>
+
             <View style={styles.totalContainer}>
               <Text style={styles.totalLabel}>Amount</Text>
               <Text style={styles.totalText}>₹{totalAmount.toFixed(2)}</Text>
             </View>
-            <TouchableOpacity 
-              style={styles.printBtn} 
-              onPress={printReceipt}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.printBtnText}>🖨️ Print Bill</Text>
+
+            <TouchableOpacity style={styles.printBtn} onPress={printReceipt}>
+              <Text style={styles.printBtnText}>Print Bill</Text>
             </TouchableOpacity>
           </View>
+
           <View style={styles.poweredBy}>
             <Text style={styles.poweredByText}>Powered by </Text>
             <Text style={styles.worldtekText}>WorldTek</Text>
           </View>
         </View>
       )}
-      
-      {/* Powered By Footer when cart is empty */}
+
+      {/* Empty Footer */}
       {totalItems === 0 && (
         <View style={styles.emptyFooter}>
           <Text style={styles.poweredByText}>Powered by </Text>
@@ -441,20 +507,9 @@ const Walkins: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#F5F7FA" 
-  },
-  center: { 
-    flex: 1, 
-    justifyContent: "center", 
-    alignItems: "center",
-    backgroundColor: "#F5F7FA",
-  },
-  worldtekLogo: {
-    width: 100,
-    height: 40,
-  },
+  container: { flex: 1, backgroundColor: "#F5F7FA" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#F5F7FA" },
+  worldtekLogo: { width: 100, height: 40 },
   header: {
     backgroundColor: "#FF6B35",
     padding: isTablet ? 30 : 24,
@@ -467,18 +522,8 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  title: { 
-    fontSize: isTablet ? 32 : 26, 
-    fontWeight: "800", 
-    color: "#fff",
-    letterSpacing: 0.5,
-  },
-  subtitle: {
-    fontSize: isTablet ? 16 : 14,
-    color: "#FFE5DC",
-    marginTop: 4,
-    fontWeight: "500",
-  },
+  title: { fontSize: isTablet ? 32 : 26, fontWeight: "800", color: "#fff", letterSpacing: 0.5 },
+  subtitle: { fontSize: isTablet ? 16 : 14, color: "#FFE5DC", marginTop: 4, fontWeight: "500" },
   syncButton: {
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     paddingHorizontal: 16,
@@ -487,11 +532,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
-  syncText: { 
-    fontSize: isTablet ? 18 : 16, 
-    color: "#fff", 
-    fontWeight: "700" 
-  },
+  syncText: { fontSize: isTablet ? 18 : 16, color: "#fff", fontWeight: "700" },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -508,51 +549,15 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  searchIcon: {
-    fontSize: 20,
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: isTablet ? 16 : 12,
-    fontSize: isTablet ? 18 : 16,
-    color: "#000",
-    fontWeight: "500",
-  },
-  clearButton: {
-    padding: 4,
-  },
-  clearText: { 
-    fontSize: 24, 
-    color: "#999",
-    fontWeight: "300",
-  },
-  sectionHeader: {
-    marginTop: 24,
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  sectionTitleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  sectionTitle: { 
-    fontSize: isTablet ? 24 : 20, 
-    fontWeight: "700", 
-    color: "#2C3E50",
-    marginRight: 12,
-  },
-  sectionLine: {
-    flex: 1,
-    height: 2,
-    backgroundColor: "#FF6B35",
-    opacity: 0.3,
-  },
-  columnWrapper: {
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
-    gap: 8,
-  },
+  searchIcon: { fontSize: 20, marginRight: 8 },
+  searchInput: { flex: 1, paddingVertical: isTablet ? 16 : 12, fontSize: isTablet ? 18 : 16, color: "#000", fontWeight: "500" },
+  clearButton: { padding: 4 },
+  clearText: { fontSize: 24, color: "#999", fontWeight: "300" },
+  sectionHeader: { marginTop: 24, marginHorizontal: 16, marginBottom: 12 },
+  sectionTitleContainer: { flexDirection: "row", alignItems: "center" },
+  sectionTitle: { fontSize: isTablet ? 24 : 20, fontWeight: "700", color: "#2C3E50", marginRight: 12 },
+  sectionLine: { flex: 1, height: 2, backgroundColor: "#FF6B35", opacity: 0.3 },
+  columnWrapper: { justifyContent: "space-between", paddingHorizontal: 12, gap: 8 },
   itemCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -567,29 +572,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  placeholderCard: {
-    backgroundColor: "transparent",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  imageContainer: {
-    position: "relative",
-    marginBottom: 12,
-  },
-  itemImage: {
-    width: "100%",
-    height: isTablet ? 140 : 120,
-    borderRadius: 12,
-    backgroundColor: "#F0F0F0",
-  },
-  placeholder: {
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#FFE5DC",
-  },
-  placeholderText: { 
-    fontSize: 40,
-  },
+  placeholderCard: { backgroundColor: "transparent", shadowOpacity: 0, elevation: 0 },
+  imageContainer: { position: "relative", marginBottom: 12 },
+  itemImage: { width: "100%", height: isTablet ? 140 : 120, borderRadius: 12, backgroundColor: "#F0F0F0" },
+  placeholder: { justifyContent: "center", alignItems: "center", backgroundColor: "#FFE5DC" },
+  placeholderText: { fontSize: 40 },
   foodTypeBadge: {
     position: "absolute",
     top: 8,
@@ -605,54 +592,16 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  vegBadge: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#4CAF50",
-  },
-  nonVegBadge: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#E53935",
-  },
-  foodTypeIndicator: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  vegIndicator: {
-    backgroundColor: "#4CAF50",
-  },
-  nonVegIndicator: {
-    backgroundColor: "#E53935",
-  },
-  details: { 
-    flex: 1,
-    marginBottom: 8,
-  },
-  itemName: { 
-    fontSize: isTablet ? 18 : 16, 
-    fontWeight: "700", 
-    color: "#2C3E50",
-    marginBottom: 4,
-  },
-  description: { 
-    fontSize: isTablet ? 14 : 13, 
-    color: "#7F8C8D", 
-    marginVertical: 4,
-    lineHeight: 18,
-    minHeight: 36,
-  },
-  price: { 
-    fontSize: isTablet ? 20 : 18, 
-    fontWeight: "800", 
-    color: "#FF6B35", 
-    marginTop: 8,
-  },
-  quantityContainer: { 
-    alignItems: "center",
-    marginTop: 8,
-  },
+  vegBadge: { backgroundColor: "#fff", borderWidth: 2, borderColor: "#4CAF50" },
+  nonVegBadge: { backgroundColor: "#fff", borderWidth: 2, borderColor: "#E53935" },
+  foodTypeIndicator: { width: 12, height: 12, borderRadius: 6 },
+  vegIndicator: { backgroundColor: "#4CAF50" },
+  nonVegIndicator: { backgroundColor: "#E53935" },
+  details: { flex: 1, marginBottom: 8 },
+  itemName: { fontSize: isTablet ? 18 : 16, fontWeight: "700", color: "#2C3E50", marginBottom: 4 },
+  description: { fontSize: isTablet ? 14 : 13, color: "#7F8C8D", marginVertical: 4, lineHeight: 18, minHeight: 36 },
+  price: { fontSize: isTablet ? 20 : 18, fontWeight: "800", color: "#FF6B35", marginTop: 8 },
+  quantityContainer: { alignItems: "center", marginTop: 8 },
   addButton: {
     backgroundColor: "#FF6B35",
     paddingHorizontal: 24,
@@ -664,12 +613,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  addText: { 
-    color: "#fff", 
-    fontWeight: "700", 
-    fontSize: isTablet ? 16 : 14,
-    letterSpacing: 0.5,
-  },
+  addText: { color: "#fff", fontWeight: "700", fontSize: isTablet ? 16 : 14, letterSpacing: 0.5 },
   counter: {
     flexDirection: "row",
     alignItems: "center",
@@ -687,25 +631,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  counterText: { 
-    color: "#fff", 
-    fontSize: 20, 
-    fontWeight: "700",
-  },
-  counterValue: { 
-    marginHorizontal: 16, 
-    fontSize: isTablet ? 18 : 16, 
-    fontWeight: "700",
-    color: "#2C3E50",
-    minWidth: 20,
-    textAlign: "center",
-  },
+  counterText: { color: "#fff", fontSize: 20, fontWeight: "700" },
+  counterValue: { marginHorizontal: 16, fontSize: isTablet ? 18 : 16, fontWeight: "700", color: "#2C3E50", minWidth: 20, textAlign: "center" },
+
+  // Footer & Modal Styles
   footer: {
     position: "absolute",
     bottom: 0,
@@ -718,32 +648,23 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 12,
   },
-  footerContent: {
-    flexDirection: "row",
-    padding: 16,
-    alignItems: "center",
-    justifyContent: "space-between",
+  footerContent: { flexDirection: "row", padding: 16, alignItems: "center", justifyContent: "space-between" },
+  summary: { flex: 1 },
+  summaryLabel: { color: "#7F8C8D", fontSize: isTablet ? 13 : 12, fontWeight: "600", marginBottom: 2 },
+  summaryText: { color: "#2C3E50", fontSize: isTablet ? 16 : 14, fontWeight: "700" },
+  totalContainer: { flex: 1, alignItems: "center" },
+  totalLabel: { color: "#7F8C8D", fontSize: isTablet ? 13 : 12, fontWeight: "600", marginBottom: 2 },
+  totalText: { color: "#FF6B35", fontSize: isTablet ? 24 : 20, fontWeight: "800" },
+  printBtn: {
+    backgroundColor: "#FF6B35",
+    paddingHorizontal: isTablet ? 28 : 24,
+    paddingVertical: isTablet ? 14 : 12,
+    borderRadius: 25,
   },
-  poweredBy: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 8,
-    paddingBottom: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  poweredByText: {
-    fontSize: 12,
-    color: "#7F8C8D",
-    fontWeight: "500",
-  },
-  worldtekText: {
-    fontSize: 12,
-    color: "#FF6B35",
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
+  printBtnText: { color: "#fff", fontWeight: "800", fontSize: isTablet ? 18 : 16, letterSpacing: 0.5 },
+  poweredBy: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 8, paddingBottom: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  poweredByText: { fontSize: 12, color: "#7F8C8D", fontWeight: "500" },
+  worldtekText: { fontSize: 12, color: "#FF6B35", fontWeight: "700", letterSpacing: 0.5 },
   emptyFooter: {
     position: "absolute",
     bottom: 0,
@@ -756,103 +677,50 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  summary: { 
-    flex: 1,
+
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 30,
+    maxHeight: Dimensions.get("window").height * 0.9,
   },
-  summaryLabel: {
-    color: "#7F8C8D",
-    fontSize: isTablet ? 13 : 12,
-    fontWeight: "600",
-    marginBottom: 2,
-  },
-  summaryText: { 
-    color: "#2C3E50", 
-    fontSize: isTablet ? 16 : 14,
-    fontWeight: "700",
-  },
-  totalContainer: {
-    flex: 1,
-    alignItems: "center",
-  },
-  totalLabel: {
-    color: "#7F8C8D",
-    fontSize: isTablet ? 13 : 12,
-    fontWeight: "600",
-    marginBottom: 2,
-  },
-  totalText: { 
-    color: "#FF6B35", 
-    fontSize: isTablet ? 24 : 20, 
-    fontWeight: "800",
-  },
-  printBtn: {
-    backgroundColor: "#FF6B35",
-    paddingHorizontal: isTablet ? 28 : 24,
-    paddingVertical: isTablet ? 14 : 12,
-    borderRadius: 25,
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  printBtnText: { 
-    color: "#fff", 
-    fontWeight: "800", 
-    fontSize: isTablet ? 18 : 16,
-    letterSpacing: 0.5,
-  },
-  loadingText: { 
-    marginTop: 16, 
-    fontSize: 18, 
-    color: "#7F8C8D",
-    fontWeight: "600",
-  },
-  offlineIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  offlineText: { 
-    fontSize: 20, 
-    color: "#E53935", 
-    marginBottom: 20,
-    fontWeight: "700",
-  },
-  retryBtn: {
-    backgroundColor: "#FF6B35",
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 25,
-    shadowColor: "#FF6B35",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  retryText: { 
-    color: "#fff", 
-    fontWeight: "700", 
-    fontSize: 16,
-  },
-  emptyContainer: {
-    alignItems: "center",
-    marginTop: 80,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  noResults: { 
-    fontSize: 18, 
-    color: "#7F8C8D", 
-    fontWeight: "600",
-  },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  modalTitle: { fontSize: 22, fontWeight: "800", color: "#2C3E50" },
+  closeButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#f0f0f0", justifyContent: "center", alignItems: "center" },
+  closeButtonText: { fontSize: 12, color: "#999", fontWeight: "bold" },
+  cartItem: { flexDirection: "row", alignItems: "center", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
+  cartItemInfo: { flex: 1 },
+  cartItemName: { fontSize: 16, fontWeight: "600", color: "#2C3E50" },
+  cartItemPrice: { fontSize: 13, color: "#7F8C8D", marginTop: 4 },
+  cartItemActions: { flexDirection: "row", alignItems: "center", marginRight: 16 },
+  modalCounterBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#FF6B35", justifyContent: "center", alignItems: "center" },
+  modalCounterText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  modalCounterValue: { marginHorizontal: 16, fontSize: 18, fontWeight: "700", minWidth: 30, textAlign: "center", color: "#2C3E50" },
+  cartItemTotal: { fontSize: 16, fontWeight: "700", color: "#FF6B35", minWidth: 80, textAlign: "right" },
+  modalTotal: { flexDirection: "row", justifyContent: "space-between", paddingTop: 16, paddingBottom: 8, borderTopWidth: 2, borderTopColor: "#FF6B35", marginTop: 16 },
+  modalTotalLabel: { fontSize: 20, fontWeight: "700", color: "#2C3E50" },
+  modalTotalAmount: { fontSize: 24, fontWeight: "800", color: "#FF6B35" },
+  modalActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 20, gap: 12 },
+  modalCloseBtn: { flex: 1, paddingVertical: 14, borderRadius: 16, backgroundColor: "#f0f0f0", alignItems: "center" },
+  modalCloseBtnText: { fontSize: 16, fontWeight: "700", color: "#2C3E50" },
+  modalPrintBtn: { flex: 1, paddingVertical: 14, borderRadius: 16, backgroundColor: "#FF6B35", alignItems: "center" },
+  modalPrintBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  emptyCartText: { textAlign: "center", padding: 40, fontSize: 16, color: "#999" },
+
+  loadingText: { marginTop: 16, fontSize: 18, color: "#7F8C8D", fontWeight: "600" },
+  offlineIcon: { fontSize: 64, marginBottom: 16 },
+  offlineText: { fontSize: 20, color: "#E53935", marginBottom: 20, fontWeight: "700" },
+  retryBtn: { backgroundColor: "#FF6B35", paddingHorizontal: 32, paddingVertical: 14, borderRadius: 25 },
+  retryText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  emptyContainer: { alignItems: "center", marginTop: 80 },
+  emptyIcon: { fontSize: 64, marginBottom: 16 },
+  noResults: { fontSize: 18, color: "#7F8C8D", fontWeight: "600" },
 });
 
 export default Walkins;

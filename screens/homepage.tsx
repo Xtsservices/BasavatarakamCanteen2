@@ -25,7 +25,7 @@ const HomePage = ({ navigation }: { navigation: NavigationProp<RootStackParamLis
                 style={styles.image}
                 resizeMode="contain"
             />
-            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 30, marginTop: 20 }}>PRANAVI’S SAMSKRITI CANTEEN</Text>
+            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 30, marginTop: 20 }}>Pranavi's Samskriti (bakery)</Text>
         </View>
     );
 };
