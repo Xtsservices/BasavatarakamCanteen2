@@ -1,0 +1,858 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  Alert,
+  ActivityIndicator,
+  SafeAreaView,
+  TextInput,
+  Dimensions,
+} from "react-native";
+import NetInfo from "@react-native-community/netinfo";
+import RNPrint from "react-native-print";
+
+interface MenuItem {
+  id: number;
+  name: string;
+  description: string;
+  price: string;
+  foodType: "veg" | "non-veg";
+  image: string;
+  categoryName: string;
+  quantity: number;
+}
+
+const { width } = Dimensions.get("window");
+const isTablet = width >= 768;
+const isLargeTablet = width >= 1024;
+const numColumns = isLargeTablet ? 3 : isTablet ? 3 : 3; // 3 on tablets, 2 on phones
+
+const Walkins: React.FC = () => {
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isConnected, setIsConnected] = useState<boolean>(true);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsConnected(state.isConnected ?? false);
+      if (state.isConnected) fetchMenuItems();
+    });
+    fetchMenuItems();
+    return () => unsubscribe();
+  }, []);
+
+  const fetchMenuItems = async () => {
+    if (!isConnected) {
+      Alert.alert("No Internet", "Please connect to the internet.");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch(
+        "http://72.60.102.11:3100/api/items/getItemsByCanteenforweb/4"
+      );
+      const result = await response.json();
+
+      if (result.data && Array.isArray(result.data)) {
+        const items: MenuItem[] = result.data.map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          description: item.description || "No description available",
+          price: item.price || "0",
+          foodType: item.foodType?.toLowerCase() === "non-veg" ? "non-veg" : "veg",
+          image: item.image || "",
+          categoryName: item.categoryName || "Others",
+          quantity: 0,
+        }));
+        setMenuItems(items);
+      } else {
+        Alert.alert("Error", "No items found.");
+      }
+    } catch (error) {
+      console.error("Fetch error:", error);
+      Alert.alert("Error", "Failed to load menu. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return menuItems;
+    return menuItems.filter((item) =>
+      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [menuItems, searchQuery]);
+
+  const groupedData = useMemo(() => {
+    const grouped: { [key: string]: MenuItem[] } = {};
+    filteredItems.forEach((item) => {
+      const cat = item.categoryName || "Others";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(item);
+    });
+    return Object.keys(grouped)
+      .sort()
+      .map((category) => ({
+        title: category,
+        data: grouped[category],
+      }));
+  }, [filteredItems]);
+
+  const increaseQuantity = (id: number) => {
+    setMenuItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, quantity: item.quantity + 1 } : item
+      )
+    );
+  };
+
+  const decreaseQuantity = (id: number) => {
+    setMenuItems((prev) =>
+      prev.map((item) =>
+        item.id === id && item.quantity > 0
+          ? { ...item, quantity: item.quantity - 1 }
+          : item
+      )
+    );
+  };
+
+  const totalItems = menuItems.reduce((sum, item) => sum + item.quantity, 0);
+  const totalAmount = menuItems.reduce(
+    (sum, item) => sum + parseFloat(item.price || "0") * item.quantity,
+    0
+  );
+
+  const printReceipt = async () => {
+    const orderedItems = menuItems.filter((item) => item.quantity > 0);
+    if (orderedItems.length === 0) {
+      Alert.alert("Empty Order", "Please add items to print bill.");
+      return;
+    }
+
+    const now = new Date();
+    const dateTime = now.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+    const html = `
+<html>
+<head>
+  <style>
+    body { font-family: Arial; margin: 15px; font-size: 22px; }
+    .header { text-align: center; font-weight: bold; font-size: 32px; margin-bottom: 10px; }
+    .datetime { text-align: center; font-size: 20px; margin-bottom: 20px; }
+    .info { margin-bottom: 20px; font-size: 20px; }
+    .row { display: flex; justify-content: space-between; margin: 8px 0; }
+    .total { border-top: 2px dashed #000; padding-top: 15px; margin-top: 20px; font-weight: bold; font-size: 28px; }
+    .footer { text-align: center; margin-top: 30px; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <div class="header">PRANAVI'S Canteen</div>
+  <div class="datetime">${dateTime}</div>
+  <div class="info">
+    <p><strong>Order ID:</strong> WI${now.getTime().toString().slice(-6)}</p>
+  </div>
+  <div class="items">
+    ${orderedItems
+      .map(
+        (item) => `
+      <div class="row">
+        <span>${item.name} × ${item.quantity}</span>
+        <span>₹${(parseFloat(item.price) * item.quantity).toFixed(2)}</span>
+      </div>`
+      )
+      .join("")}
+  </div>
+  <div class="total">
+    <div class="row">
+      <span>Total Amount</span>
+      <span>₹${totalAmount.toFixed(2)}</span>
+    </div>
+  </div>
+  <div class="footer">Thank You! Visit Again!</div>
+</body>
+</html>`;
+
+    try {
+      await RNPrint.print({ html });
+      Alert.alert("Success", "Bill printed successfully!");
+      //here make api call to save the order details in backend 
+      //http://72.60.102.11:3100/api/orders/create
+      const body = {
+        mobileNumber: "0000000000",
+        canteenId: 4,
+        items: orderedItems.map((item) => ({
+          itemId: item.id,
+          quantity: item.quantity,
+        })),
+        totalAmount: totalAmount,
+        payment: {
+          payment_status: "success",
+          amount: totalAmount,
+        }
+      };
+      console.log("Order Body:", body);
+      const response = await fetch("http://72.60.102.11:3100/api/orders/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      console.log("Order API Response Status:", response);
+
+      setMenuItems((prev) => prev.map((item) => ({ ...item, quantity: 0 })));
+      
+    } catch (err) {
+      Alert.alert("Print Failed", "Could not print the bill.");
+    }
+  };
+
+  const truncateText = (text: string, maxLength: number = 50) => {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + "...";
+  };
+
+  const renderItemCard = ({ item }: { item: MenuItem }) => (
+    <View style={styles.itemCard}>
+      <View style={styles.imageContainer}>
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.itemImage} />
+        ) : (
+          <View style={[styles.itemImage, styles.placeholder]}>
+            <Text style={styles.placeholderText}>🍽️</Text>
+          </View>
+        )}
+        <View style={[styles.foodTypeBadge, item.foodType === "veg" ? styles.vegBadge : styles.nonVegBadge]}>
+          <View style={[styles.foodTypeIndicator, item.foodType === "veg" ? styles.vegIndicator : styles.nonVegIndicator]} />
+        </View>
+      </View>
+
+      <View style={styles.details}>
+        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.description} numberOfLines={2}>
+          {truncateText(item.description, 60)}
+        </Text>
+        <Text style={styles.price}>₹{parseFloat(item.price).toFixed(2)}</Text>
+      </View>
+
+      <View style={styles.quantityContainer}>
+        {item.quantity === 0 ? (
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => increaseQuantity(item.id)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.addText}>ADD +</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.counter}>
+            <TouchableOpacity
+              style={styles.counterBtn}
+              onPress={() => decreaseQuantity(item.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.counterText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.counterValue}>{item.quantity}</Text>
+            <TouchableOpacity
+              style={styles.counterBtn}
+              onPress={() => increaseQuantity(item.id)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.counterText}>+</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+
+  const renderSection = ({ item }: { item: { title: string; data: MenuItem[] } }) => {
+    // Ensure items are divisible by numColumns for proper layout
+    const itemsToRender = [...item.data];
+    const remainder = itemsToRender.length % numColumns;
+    
+    if (remainder !== 0) {
+      // Add placeholders to fill the last row
+      const placeholdersNeeded = numColumns - remainder;
+      for (let i = 0; i < placeholdersNeeded; i++) {
+        itemsToRender.push({
+          id: -(i + 1),
+          name: "",
+          description: "",
+          price: "0",
+          foodType: "veg",
+          image: "",
+          categoryName: "",
+          quantity: 0,
+        } as MenuItem);
+      }
+    }
+
+    return (
+      <View>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>{item.title}</Text>
+            <View style={styles.sectionLine} />
+          </View>
+        </View>
+        <FlatList
+          data={itemsToRender}
+          renderItem={({ item }) => {
+            if (item.id < 0) {
+              return <View style={[styles.itemCard, styles.placeholderCard]} />;
+            }
+            return renderItemCard({ item });
+          }}
+          keyExtractor={(i, index) => i.id > 0 ? i.id.toString() : `placeholder-${index}`}
+          numColumns={numColumns}
+          key={numColumns} // Important: forces re-render when columns change
+          columnWrapperStyle={styles.columnWrapper}
+          scrollEnabled={false}
+        />
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#FF6B35" />
+        <Text style={styles.loadingText}>Loading delicious menu...</Text>
+      </View>
+    );
+  }
+
+  if (!isConnected) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.offlineIcon}>📡</Text>
+        <Text style={styles.offlineText}>No Internet Connection</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={fetchMenuItems}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header with Gradient Effect */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>PRANAVI’S SAMSKRITI CANTEEN</Text>
+          <Text style={styles.subtitle}>Select your favorites</Text>
+        </View>
+        <TouchableOpacity style={styles.syncButton} onPress={fetchMenuItems}>
+          <Text style={styles.syncText}>🔄 Sync</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search for delicious items..."
+          placeholderTextColor="#999"
+        />
+        {searchQuery ? (
+          <TouchableOpacity onPress={() => setSearchQuery("")} style={styles.clearButton}>
+            <Text style={styles.clearText}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {/* Menu List */}
+      <FlatList
+        data={groupedData}
+        renderItem={renderSection}
+        keyExtractor={(item) => item.title}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: totalItems > 0 ? 180 : 100 }}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>🍽️</Text>
+            <Text style={styles.noResults}>
+              {searchQuery ? "No items found" : "Menu is empty"}
+            </Text>
+          </View>
+        }
+      />
+
+      {/* Fixed Bottom Bar with Animation */}
+      {totalItems > 0 && (
+        <View style={styles.footer}>
+          <View style={styles.footerContent}>
+            <View style={styles.summary}>
+              <Text style={styles.summaryLabel}>Total Items</Text>
+              <Text style={styles.summaryText}>{totalItems} items</Text>
+            </View>
+            <View style={styles.totalContainer}>
+              <Text style={styles.totalLabel}>Amount</Text>
+              <Text style={styles.totalText}>₹{totalAmount.toFixed(2)}</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.printBtn} 
+              onPress={printReceipt}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.printBtnText}>🖨️ Print Bill</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.poweredBy}>
+            <Text style={styles.poweredByText}>Powered by </Text>
+            <Text style={styles.worldtekText}>WorldTek</Text>
+          </View>
+        </View>
+      )}
+      
+      {/* Powered By Footer when cart is empty */}
+      {totalItems === 0 && (
+        <View style={styles.emptyFooter}>
+          <Text style={styles.poweredByText}>Powered by </Text>
+          <Image
+            source={require("../../images/footerLogo.png")}
+            style={styles.worldtekLogo}
+            resizeMode="contain"
+          />
+        </View>
+      )}
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: "#F5F7FA" 
+  },
+  center: { 
+    flex: 1, 
+    justifyContent: "center", 
+    alignItems: "center",
+    backgroundColor: "#F5F7FA",
+  },
+  worldtekLogo: {
+    width: 100,
+    height: 40,
+  },
+  header: {
+    backgroundColor: "#FF6B35",
+    padding: isTablet ? 30 : 24,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  title: { 
+    fontSize: isTablet ? 32 : 26, 
+    fontWeight: "800", 
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: isTablet ? 16 : 14,
+    color: "#FFE5DC",
+    marginTop: 4,
+    fontWeight: "500",
+  },
+  syncButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+  },
+  syncText: { 
+    fontSize: isTablet ? 18 : 16, 
+    color: "#fff", 
+    fontWeight: "700" 
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  searchIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: isTablet ? 16 : 12,
+    fontSize: isTablet ? 18 : 16,
+    color: "#000",
+    fontWeight: "500",
+  },
+  clearButton: {
+    padding: 4,
+  },
+  clearText: { 
+    fontSize: 24, 
+    color: "#999",
+    fontWeight: "300",
+  },
+  sectionHeader: {
+    marginTop: 24,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  sectionTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sectionTitle: { 
+    fontSize: isTablet ? 24 : 20, 
+    fontWeight: "700", 
+    color: "#2C3E50",
+    marginRight: 12,
+  },
+  sectionLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: "#FF6B35",
+    opacity: 0.3,
+  },
+  columnWrapper: {
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  itemCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 12,
+    margin: 4,
+    flex: 1,
+    maxWidth: numColumns === 3 ? "31%" : "48%",
+    minHeight: isTablet ? 320 : 280,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  placeholderCard: {
+    backgroundColor: "transparent",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  imageContainer: {
+    position: "relative",
+    marginBottom: 12,
+  },
+  itemImage: {
+    width: "100%",
+    height: isTablet ? 140 : 120,
+    borderRadius: 12,
+    backgroundColor: "#F0F0F0",
+  },
+  placeholder: {
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFE5DC",
+  },
+  placeholderText: { 
+    fontSize: 40,
+  },
+  foodTypeBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  vegBadge: {
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: "#4CAF50",
+  },
+  nonVegBadge: {
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: "#E53935",
+  },
+  foodTypeIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  vegIndicator: {
+    backgroundColor: "#4CAF50",
+  },
+  nonVegIndicator: {
+    backgroundColor: "#E53935",
+  },
+  details: { 
+    flex: 1,
+    marginBottom: 8,
+  },
+  itemName: { 
+    fontSize: isTablet ? 18 : 16, 
+    fontWeight: "700", 
+    color: "#2C3E50",
+    marginBottom: 4,
+  },
+  description: { 
+    fontSize: isTablet ? 14 : 13, 
+    color: "#7F8C8D", 
+    marginVertical: 4,
+    lineHeight: 18,
+    minHeight: 36,
+  },
+  price: { 
+    fontSize: isTablet ? 20 : 18, 
+    fontWeight: "800", 
+    color: "#FF6B35", 
+    marginTop: 8,
+  },
+  quantityContainer: { 
+    alignItems: "center",
+    marginTop: 8,
+  },
+  addButton: {
+    backgroundColor: "#FF6B35",
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  addText: { 
+    color: "#fff", 
+    fontWeight: "700", 
+    fontSize: isTablet ? 16 : 14,
+    letterSpacing: 0.5,
+  },
+  counter: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF3F0",
+    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#FFD4C8",
+  },
+  counterBtn: {
+    width: isTablet ? 36 : 32,
+    height: isTablet ? 36 : 32,
+    backgroundColor: "#FF6B35",
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  counterText: { 
+    color: "#fff", 
+    fontSize: 20, 
+    fontWeight: "700",
+  },
+  counterValue: { 
+    marginHorizontal: 16, 
+    fontSize: isTablet ? 18 : 16, 
+    fontWeight: "700",
+    color: "#2C3E50",
+    minWidth: 20,
+    textAlign: "center",
+  },
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  footerContent: {
+    flexDirection: "row",
+    padding: 16,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  poweredBy: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
+  poweredByText: {
+    fontSize: 12,
+    color: "#7F8C8D",
+    fontWeight: "500",
+  },
+  worldtekText: {
+    fontSize: 12,
+    color: "#FF6B35",
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  emptyFooter: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  summary: { 
+    flex: 1,
+  },
+  summaryLabel: {
+    color: "#7F8C8D",
+    fontSize: isTablet ? 13 : 12,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  summaryText: { 
+    color: "#2C3E50", 
+    fontSize: isTablet ? 16 : 14,
+    fontWeight: "700",
+  },
+  totalContainer: {
+    flex: 1,
+    alignItems: "center",
+  },
+  totalLabel: {
+    color: "#7F8C8D",
+    fontSize: isTablet ? 13 : 12,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  totalText: { 
+    color: "#FF6B35", 
+    fontSize: isTablet ? 24 : 20, 
+    fontWeight: "800",
+  },
+  printBtn: {
+    backgroundColor: "#FF6B35",
+    paddingHorizontal: isTablet ? 28 : 24,
+    paddingVertical: isTablet ? 14 : 12,
+    borderRadius: 25,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  printBtnText: { 
+    color: "#fff", 
+    fontWeight: "800", 
+    fontSize: isTablet ? 18 : 16,
+    letterSpacing: 0.5,
+  },
+  loadingText: { 
+    marginTop: 16, 
+    fontSize: 18, 
+    color: "#7F8C8D",
+    fontWeight: "600",
+  },
+  offlineIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  offlineText: { 
+    fontSize: 20, 
+    color: "#E53935", 
+    marginBottom: 20,
+    fontWeight: "700",
+  },
+  retryBtn: {
+    backgroundColor: "#FF6B35",
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 25,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  retryText: { 
+    color: "#fff", 
+    fontWeight: "700", 
+    fontSize: 16,
+  },
+  emptyContainer: {
+    alignItems: "center",
+    marginTop: 80,
+  },
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  noResults: { 
+    fontSize: 18, 
+    color: "#7F8C8D", 
+    fontWeight: "600",
+  },
+});
+
+export default Walkins;
