@@ -40,6 +40,7 @@ const Walkins: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isCartModalVisible, setIsCartModalVisible] = useState<boolean>(false);
   const [isPaymentModalVisible, setIsPaymentModalVisible] = useState<boolean>(false);
+  const [selectedCoupon, setSelectedCoupon] = useState<number | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
@@ -173,10 +174,23 @@ const Walkins: React.FC = () => {
       Alert.alert("Empty Cart", "Please add items first.");
       return;
     }
-    setIsPaymentModalVisible(true); // Show Cash/UPI modal
+    setSelectedCoupon(null); // Reset coupon selection
+    setIsPaymentModalVisible(true); // Show payment modal
   };
 
-  const confirmPaymentAndPrint = async (paymentMode: "Cash" | "UPI") => {
+  const confirmPaymentAndPrint = async (paymentMode: "Cash" | "UPI" | "Coupon+Cash" | "Coupon+UPI" | "CouponOnly") => {
+    // Validate coupon if it's a coupon payment
+    if (paymentMode === "Coupon+Cash" || paymentMode === "Coupon+UPI" || paymentMode === "CouponOnly") {
+      if (!selectedCoupon) {
+        Alert.alert("Error", "Please select a coupon first.");
+        return;
+      }
+      if (totalAmount < selectedCoupon) {
+        Alert.alert("Invalid Coupon", `Your order total (₹${totalAmount.toFixed(2)}) is less than the coupon value (₹${selectedCoupon}). Please add more items or choose a smaller coupon.`);
+        return;
+      }
+    }
+
     setIsPaymentModalVisible(false);
 
     const orderedItems = menuItems.filter((item) => item.quantity > 0);
@@ -191,7 +205,26 @@ const Walkins: React.FC = () => {
       hour12: true,
     });
 
-    const paymentText = paymentMode === "Cash" ? "Paid by Cash" : "Paid by UPI";
+    // Calculate payment breakdown
+    let couponAmount = 0;
+    let remainingAmount = totalAmount;
+    let paymentMethod = paymentMode.toLowerCase();
+    let paymentDetails = "";
+
+    if (paymentMode === "CouponOnly") {
+      couponAmount = selectedCoupon || 0;
+      remainingAmount = 0;
+      paymentDetails = `Paid by Coupon ₹${couponAmount}`;
+      paymentMethod = "coupon_only";
+    } else if (paymentMode === "Coupon+Cash" || paymentMode === "Coupon+UPI") {
+      couponAmount = selectedCoupon || 0;
+      remainingAmount = Math.max(0, totalAmount - couponAmount);
+      const extraPaymentMode = paymentMode === "Coupon+Cash" ? "Cash" : "UPI";
+      paymentDetails = `Coupon ₹${couponAmount} + ${extraPaymentMode} ₹${remainingAmount.toFixed(2)}`;
+      paymentMethod = paymentMode.toLowerCase().replace("+", "_"); // "coupon_cash" or "coupon_upi"
+    } else {
+      paymentDetails = `Paid by ${paymentMode}`;
+    }
 
     const html = `
 <html>
@@ -225,7 +258,18 @@ const Walkins: React.FC = () => {
       <span>Total Amount</span>
       <span>₹${totalAmount.toFixed(2)}</span>
     </div>
+    ${couponAmount > 0 ? `
+    <div class="row">
+      <span>Coupon (₹${couponAmount})</span>
+      <span>-₹${couponAmount.toFixed(2)}</span>
+    </div>
+    <div class="row">
+      <span>Remaining</span>
+      <span>₹${remainingAmount.toFixed(2)}</span>
+    </div>
+    ` : ''}
   </div>
+  <div class="payment">${paymentDetails}</div>
   <div class="footer">
     Thank'S  For Choosing WORLDTEK
   </div>
@@ -234,9 +278,9 @@ const Walkins: React.FC = () => {
 
     try {
       await RNPrint.print({ html });
-      Alert.alert("Success", `Bill printed! Paid via ${paymentMode}`);
+      Alert.alert("Success", `Bill printed! ${paymentDetails}`);
 
-      // Save order
+      // Save order with coupon details
       const body = {
         mobileNumber: "0000000000",
         canteenId: 4,
@@ -248,19 +292,28 @@ const Walkins: React.FC = () => {
         payment: {
           payment_status: "success",
           amount: totalAmount,
-          payment_method: paymentMode.toLowerCase(),
+          payment_method: paymentMethod,
+          ...(couponAmount > 0 && {
+            coupon_amount: couponAmount,
+            coupon_type: `coupon_${selectedCoupon}`,
+          }),
         },
       };
 
+      // console.log("Order details:", body);  
+      
+      //192.168.0.6
+      //72.60.102.11
       await fetch("http://72.60.102.11:3100/api/orders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
-      // Reset cart
+      // Reset cart and coupon
       setMenuItems((prev) => prev.map((item) => ({ ...item, quantity: 0 })));
       setIsCartModalVisible(false);
+      setSelectedCoupon(null);
     } catch (err) {
       Alert.alert("Print Failed", "Could not print the bill.");
     }
@@ -497,21 +550,137 @@ const Walkins: React.FC = () => {
         <View style={styles.paymentOverlay}>
           <View style={styles.paymentModal}>
             <Text style={styles.paymentTitle}>Select Payment Mode</Text>
+            <Text style={styles.totalAmountText}>Total: ₹{totalAmount.toFixed(2)}</Text>
+            
+            {/* Regular Payment Options */}
             <View style={styles.paymentButtons}>
               <TouchableOpacity
                 style={[styles.paymentBtn, styles.cashBtn]}
                 onPress={() => confirmPaymentAndPrint("Cash")}
               >
-                <Text style={styles.paymentBtnText}>Cash</Text>
+                <Text style={styles.paymentBtnText}>💵 Cash</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.paymentBtn, styles.upiBtn]}
                 onPress={() => confirmPaymentAndPrint("UPI")}
               >
-                <Text style={styles.paymentBtnText}>UPI</Text>
+                <Text style={styles.paymentBtnText}>📱 UPI</Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.paymentCancel} onPress={() => setIsPaymentModalVisible(false)}>
+
+            {/* Coupon Section */}
+            <View style={styles.couponSection}>
+              <Text style={styles.couponSectionTitle}>With Coupon</Text>
+              
+              {/* Coupon Selection */}
+              <View style={styles.couponSelection}>
+                <TouchableOpacity
+                  style={[
+                    styles.couponOption, 
+                    selectedCoupon === 60 && styles.couponOptionSelected,
+                    totalAmount < 60 && styles.couponOptionDisabled
+                  ]}
+                  onPress={() => {
+                    if (totalAmount >= 60) {
+                      setSelectedCoupon(60);
+                    } else {
+                      Alert.alert("Invalid Coupon", `Minimum order value for ₹60 coupon is ₹60. Your current total is ₹${totalAmount.toFixed(2)}`);
+                    }
+                  }}
+                  disabled={totalAmount < 60}
+                >
+                  <Text style={[
+                    styles.couponText, 
+                    selectedCoupon === 60 && styles.couponTextSelected,
+                    totalAmount < 60 && styles.couponTextDisabled
+                  ]}>
+                    🎟️ ₹60 Coupon
+                  </Text>
+                  {totalAmount < 60 && (
+                    <Text style={styles.minOrderText}>Min: ₹60</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.couponOption, 
+                    selectedCoupon === 100 && styles.couponOptionSelected,
+                    totalAmount < 100 && styles.couponOptionDisabled
+                  ]}
+                  onPress={() => {
+                    if (totalAmount >= 100) {
+                      setSelectedCoupon(100);
+                    } else {
+                      Alert.alert("Invalid Coupon", `Minimum order value for ₹100 coupon is ₹100. Your current total is ₹${totalAmount.toFixed(2)}`);
+                    }
+                  }}
+                  disabled={totalAmount < 100}
+                >
+                  <Text style={[
+                    styles.couponText, 
+                    selectedCoupon === 100 && styles.couponTextSelected,
+                    totalAmount < 100 && styles.couponTextDisabled
+                  ]}>
+                    🎟️ ₹100 Coupon
+                  </Text>
+                  {totalAmount < 100 && (
+                    <Text style={styles.minOrderText}>Min: ₹100</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* Show remaining amount if coupon selected */}
+              {selectedCoupon && (
+                <View style={styles.couponBreakdown}>
+                  <Text style={styles.breakdownText}>
+                    Coupon: ₹{selectedCoupon} | Remaining: ₹{Math.max(0, totalAmount - selectedCoupon).toFixed(2)}
+                  </Text>
+                  {totalAmount === selectedCoupon && (
+                    <Text style={[styles.breakdownText, { color: "#4CAF50", marginTop: 4, fontSize: 13 }]}>
+                      ✓ Fully covered by coupon!
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Coupon + Payment buttons OR Coupon Only */}
+              {selectedCoupon && (
+                totalAmount > selectedCoupon ? (
+                  // Show Coupon + Cash/UPI when there's remaining amount
+                  <View style={styles.couponPaymentRow}>
+                    <TouchableOpacity
+                      style={[styles.paymentBtn, styles.couponCashBtn, { flex: 1 }]}
+                      onPress={() => confirmPaymentAndPrint("Coupon+Cash")}
+                    >
+                      <Text style={[styles.paymentBtnText, { color: "#090909ff" }]}>Coupon + Cash</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.paymentBtn, styles.couponUpiBtn, { flex: 1 }]}
+                      onPress={() => confirmPaymentAndPrint("Coupon+UPI")}
+                    >
+                      <Text style={[styles.paymentBtnText, { color: "#fff" }]}>Coupon + UPI</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  // Show Coupon Only when total equals coupon value
+                  <View style={styles.paymentButtons}>
+                    <TouchableOpacity
+                      style={[styles.paymentBtn, styles.couponOnlyBtn]}
+                      onPress={() => confirmPaymentAndPrint("CouponOnly")}
+                    >
+                      <Text style={[styles.paymentBtnText, { color: "#fff" }]}>🎟️ Pay with Coupon Only</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={styles.paymentCancel} 
+              onPress={() => {
+                setIsPaymentModalVisible(false);
+                setSelectedCoupon(null);
+              }}
+            >
               <Text style={styles.paymentCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -601,7 +770,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: isTablet ? 24 : 20, fontWeight: "700", color: "#2C3E50", marginRight: 12 },
   sectionLine: { flex: 1, height: 2, backgroundColor: "#FF6B35", opacity: 0.3 },
   columnWrapper: { justifyContent: "space-between", paddingHorizontal: 12, gap: 8 },
-  itemCard: { backgroundColor: "#fff", borderRadius: 16, padding: 12, margin: 4, flex: 1, maxWidth: numColumns === 3 ? "31%" : "48%", minHeight: isTablet ? 320 : 280, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 5 },
+  itemCard: { backgroundColor: "#fff", borderRadius: 16, padding: 12, margin: 4, flex: 1, maxWidth: numColumns === 4 ? "23%" : "48%", minHeight: isTablet ? 320 : 280, shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 5 },
   placeholderCard: { backgroundColor: "transparent", shadowOpacity: 0, elevation: 0 },
   imageContainer: { position: "relative", marginBottom: 12 },
   itemImage: { width: "100%", height: isTablet ? 140 : 120, borderRadius: 12, backgroundColor: "#F0F0F0" },
@@ -644,14 +813,61 @@ const styles = StyleSheet.create({
 
   // Payment Modal
   paymentOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)", justifyContent: "center", alignItems: "center" },
-  paymentModal: { backgroundColor: "#fff", width: "85%", borderRadius: 20, padding: 30, alignItems: "center" },
-  paymentTitle: { fontSize: 24, fontWeight: "800", color: "#2C3E50", marginBottom: 30 },
-  paymentButtons: { flexDirection: "row", gap: 20, marginBottom: 20 },
+  paymentModal: { backgroundColor: "#fff", width: "90%", maxWidth: 500, borderRadius: 20, padding: 30, alignItems: "center", maxHeight: "85%" },
+  paymentTitle: { fontSize: 24, fontWeight: "800", color: "#2C3E50", marginBottom: 10 },
+  totalAmountText: { fontSize: 20, fontWeight: "700", color: "#FF6B35", marginBottom: 20 },
+  paymentButtons: { flexDirection: "row", gap: 20, marginBottom: 20, flexWrap: "wrap", justifyContent: "center" },
   paymentBtn: { paddingVertical: 18, paddingHorizontal: 40, borderRadius: 16, minWidth: 120 },
   cashBtn: { backgroundColor: "transparent", borderWidth: 2, borderColor: "#FF6B35" },
   upiBtn: { backgroundColor: "#FF6B35" },
+  couponCashBtn: { backgroundColor: "transparent", borderWidth: 2, borderColor: "#FF6B35"  },
+  couponUpiBtn: { backgroundColor: "#FF6B35" },
+  couponOnlyBtn: { backgroundColor: "#FF6B35", minWidth: 200 },
+  couponPaymentRow: { 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    width: "100%", 
+    gap: 12,
+    marginBottom: 20
+  },
   paymentBtnText: { color: "black", fontSize: 18, fontWeight: "700", textAlign: "center" },
-  paymentCancel: { marginTop: 10 },
+  
+  // Coupon Section
+  couponSection: { width: "100%", marginTop: 20, paddingTop: 20, borderTopWidth: 2, borderTopColor: "#F0F0F0" },
+  couponSectionTitle: { fontSize: 18, fontWeight: "700", color: "#2C3E50", marginBottom: 15, textAlign: "center" },
+  couponSelection: { flexDirection: "row", gap: 12, marginBottom: 15, justifyContent: "center" },
+  couponOption: { 
+    paddingVertical: 12, 
+    paddingHorizontal: 20, 
+    borderRadius: 12, 
+    borderWidth: 2, 
+    borderColor: "#DDD",
+    backgroundColor: "#F9F9F9"
+  },
+  couponOptionSelected: { 
+    borderColor: "#FF6B35", 
+    backgroundColor: "#FFF0ED" 
+  },
+  couponOptionDisabled: {
+    backgroundColor: "#F0F0F0",
+    borderColor: "#CCC",
+    opacity: 0.6
+  },
+  couponText: { fontSize: 16, fontWeight: "600", color: "#666" },
+  couponTextSelected: { color: "#FF6B35", fontWeight: "700" },
+  couponTextDisabled: { color: "#999" },
+  minOrderText: { fontSize: 11, color: "#999", marginTop: 4, fontWeight: "500" },
+  couponBreakdown: { 
+    backgroundColor: "#FFF9E6", 
+    padding: 12, 
+    borderRadius: 10, 
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#FFE5B4"
+  },
+  breakdownText: { fontSize: 15, fontWeight: "600", color: "#856404", textAlign: "center" },
+
+  paymentCancel: { marginTop: 20 , backgroundColor: "transparent", borderWidth: 2, borderColor: "#FF6B35" ,padding:8, borderRadius:12},
   paymentCancelText: { color: "#999", fontSize: 16, fontWeight: "600" },
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
